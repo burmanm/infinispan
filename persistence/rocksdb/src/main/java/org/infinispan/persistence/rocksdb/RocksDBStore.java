@@ -44,6 +44,8 @@ import org.infinispan.metadata.Metadata;
 import org.infinispan.persistence.internal.PersistenceUtil;
 import org.infinispan.persistence.rocksdb.configuration.RocksDBStoreConfiguration;
 import org.infinispan.persistence.rocksdb.logging.Log;
+import org.infinispan.persistence.rocksdb.metrics.StatisticsExporter;
+import org.infinispan.persistence.rocksdb.metrics.StatisticsExporterImpl;
 import org.infinispan.persistence.spi.InitializationContext;
 import org.infinispan.persistence.spi.MarshallableEntry;
 import org.infinispan.persistence.spi.MarshallableEntryFactory;
@@ -67,6 +69,8 @@ import org.rocksdb.ReadOptions;
 import org.rocksdb.RocksDB;
 import org.rocksdb.RocksDBException;
 import org.rocksdb.RocksIterator;
+import org.rocksdb.Statistics;
+import org.rocksdb.StatsLevel;
 import org.rocksdb.WriteBatch;
 import org.rocksdb.WriteOptions;
 
@@ -92,6 +96,7 @@ public class RocksDBStore<K,V> implements SegmentedAdvancedLoadWriteStore<K,V> {
     private Properties columnFamilyProperties;
     private Marshaller marshaller;
     private MarshallableEntryFactory<K, V> entryFactory;
+    private StatisticsExporter statisticsExporter;
     private volatile boolean stopped = true;
 
     @Override
@@ -110,6 +115,7 @@ public class RocksDBStore<K,V> implements SegmentedAdvancedLoadWriteStore<K,V> {
 
         AdvancedCache cache = ctx.getCache().getAdvancedCache();
         KeyPartitioner keyPartitioner = cache.getComponentRegistry().getComponent(KeyPartitioner.class);
+        this.statisticsExporter = ctx.getCache().getAdvancedCache().getComponentRegistry().getComponent(StatisticsExporter.class);
         if (configuration.segmented()) {
             handler = new SegmentedRocksDBHandler(cache.getCacheConfiguration().clustering().hash().numSegments(),
                   keyPartitioner);
@@ -166,6 +172,12 @@ public class RocksDBStore<K,V> implements SegmentedAdvancedLoadWriteStore<K,V> {
             }
         } else {
             dbOptions = new DBOptions();
+        }
+        if(statisticsExporter != null) {
+            Statistics statistics = new Statistics();
+            statistics.setStatsLevel(StatsLevel.ALL);
+            ((StatisticsExporterImpl) this.statisticsExporter).init(statistics);
+            dbOptions.setStatistics(statistics);
         }
         return dbOptions
               .setCreateIfMissing(true)
