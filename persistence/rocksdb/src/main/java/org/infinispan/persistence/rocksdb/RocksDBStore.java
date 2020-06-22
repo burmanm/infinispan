@@ -7,7 +7,9 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Calendar;
 import java.util.Collections;
+import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -57,7 +59,6 @@ import org.rocksdb.BuiltinComparator;
 import org.rocksdb.ColumnFamilyDescriptor;
 import org.rocksdb.ColumnFamilyHandle;
 import org.rocksdb.ColumnFamilyOptions;
-import org.rocksdb.CompressionType;
 import org.rocksdb.DBOptions;
 import org.rocksdb.Options;
 import org.rocksdb.ReadOptions;
@@ -596,8 +597,10 @@ public class RocksDBStore<K,V> implements SegmentedAdvancedLoadWriteStore<K,V> {
             } else {
                 columnFamilyOptions = new ColumnFamilyOptions();
             }
-            return new ColumnFamilyDescriptor(name,
-                  columnFamilyOptions.setCompressionType(CompressionType.getCompressionType(configuration.compressionType().toString())));
+            if (configuration.attributes().attribute(RocksDBStoreConfiguration.COMPRESSION_TYPE).isModified()) {
+                columnFamilyOptions.setCompressionType(configuration.compressionType().getValue());
+            }
+            return new ColumnFamilyDescriptor(name, columnFamilyOptions);
         }
 
         boolean contains(int segment, Object key) {
@@ -993,7 +996,120 @@ public class RocksDBStore<K,V> implements SegmentedAdvancedLoadWriteStore<K,V> {
             for (int i = 0; i < segmentCount; ++i) {
                 handles.set(i, outHandles.get(i + 1));
             }
+//            printKeyInfo(rocksDB);
             return rocksDB;
+        }
+
+        private void printKeyInfo(RocksDB db) {
+            Date currentDate = new Date();
+            Calendar c = Calendar.getInstance();
+            c.setTime(currentDate);
+            c.add(10, -168);
+            Date maxExpireTimeDate = c.getTime();
+            long maxExpireTimeForEvents = maxExpireTimeDate.getTime();
+            long totalCount = 0L;
+            long failedReads = 0L;
+            long expiredItems = 0L;
+            long expiredFromCreatedTime = 0L;
+            long events = 0L;
+            long expiredKeyParsing = 0L;
+            ReadOptions readOptions = (new ReadOptions()).setFillCache(false);
+
+            try {
+                IntSet integers = IntSets.immutableRangeSet(this.handles.length());
+                PrimitiveIterator.OfInt var21 = integers.iterator();
+
+                while(var21.hasNext()) {
+                    Integer i = (Integer)var21.next();
+                    RocksIterator iterator = RocksDBStore.this.handler.wrapIterator(db, readOptions, i);
+                    if (iterator != null) {
+                        RocksIterator it = iterator;
+
+                        try {
+                            it.seekToFirst();
+
+                            for(; it.isValid(); it.next()) {
+                                ++totalCount;
+                                byte[] key = it.key();
+                                byte[] value = it.value();
+                                MarshallableEntry me = null;
+
+                                String sKey;
+                                try {
+                                    Object keyO = RocksDBStore.this.unmarshall(key);
+                                    sKey = (String)keyO;
+                                    me = RocksDBStore.this.valueToMarshallableEntry(key, value, true);
+                                } catch (ClassNotFoundException | IOException var35) {
+                                    ++failedReads;
+                                    continue;
+                                }
+
+                                if (me == null) {
+                                    ++failedReads;
+                                } else {
+                                    if (me.isExpired(RocksDBStore.this.timeService.wallClockTime())) {
+                                        ++expiredItems;
+                                    }
+
+                                    if (sKey.startsWith("Event")) {
+                                        if (me.created() < maxExpireTimeForEvents) {
+                                            ++expiredFromCreatedTime;
+                                        }
+
+                                        ++events;
+                                        String[] splitParts = sKey.split("-");
+                                        if (splitParts.length - 6 > 0) {
+                                            try {
+                                                long ctime = Long.valueOf(splitParts[splitParts.length - 6]);
+                                                if (ctime < maxExpireTimeForEvents) {
+                                                    ++expiredKeyParsing;
+                                                }
+                                            } catch (Exception var34) {
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (Throwable var36) {
+                            if (iterator != null) {
+                                try {
+                                    it.close();
+                                } catch (Throwable var33) {
+                                    var36.addSuppressed(var33);
+                                }
+                            }
+
+                            throw var36;
+                        }
+
+                        if (it != null) {
+                            it.close();
+                        }
+                    }
+                }
+            } catch (Throwable var37) {
+                if (readOptions != null) {
+                    try {
+                        readOptions.close();
+                    } catch (Throwable var32) {
+                        var37.addSuppressed(var32);
+                    }
+                }
+
+                throw var37;
+            }
+
+            if (readOptions != null) {
+                readOptions.close();
+            }
+
+            RocksDBStore.log.infof("Statistics from scanning of RocksDB data:", new Object[0]);
+            RocksDBStore.log.infof("Total count: %d", totalCount);
+            RocksDBStore.log.infof("Event count: %d", events);
+            RocksDBStore.log.infof("Failed reads: %d", failedReads);
+            RocksDBStore.log.infof("Expired reads: %d", expiredItems);
+            RocksDBStore.log.infof("Expired event items: %d", expiredFromCreatedTime);
+            RocksDBStore.log.infof("Expired from key parsing: %d", expiredKeyParsing);
         }
 
         @Override
