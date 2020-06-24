@@ -10,6 +10,7 @@ import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Collections;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -18,6 +19,7 @@ import java.util.Properties;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReferenceArray;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -995,8 +997,10 @@ public class RocksDBStore<K,V> implements SegmentedAdvancedLoadWriteStore<K,V> {
             RocksDB rocksDB = RocksDB.open(options, location.toString(), descriptors, outHandles);
             for (int i = 0; i < segmentCount; ++i) {
                 handles.set(i, outHandles.get(i + 1));
+                log.infof("Compacting ColumnFamilyHandle %d\n", i);
+                rocksDB.compactRange(getHandle(i));
             }
-//            printKeyInfo(rocksDB);
+            printKeyInfo(rocksDB);
             return rocksDB;
         }
 
@@ -1013,7 +1017,10 @@ public class RocksDBStore<K,V> implements SegmentedAdvancedLoadWriteStore<K,V> {
             long expiredFromCreatedTime = 0L;
             long events = 0L;
             long expiredKeyParsing = 0L;
+            long expiredActions = 0;
             ReadOptions readOptions = (new ReadOptions()).setFillCache(false);
+
+            Map<String, AtomicLong> keyStats = new HashMap<>();
 
             try {
                 IntSet integers = IntSets.immutableRangeSet(this.handles.length());
@@ -1051,13 +1058,20 @@ public class RocksDBStore<K,V> implements SegmentedAdvancedLoadWriteStore<K,V> {
                                         ++expiredItems;
                                     }
 
-                                    if (sKey.startsWith("Event")) {
+                                    String[] splitParts = sKey.split("-");
+                                    String subKey = splitParts[0];
+                                    if(keyStats.containsKey(subKey)) {
+                                        keyStats.get(subKey).addAndGet(1);
+                                    } else {
+                                        keyStats.put(subKey, new AtomicLong(1));
+                                    }
+
+                                    if (subKey.equals("Event")) {
                                         if (me.created() < maxExpireTimeForEvents) {
                                             ++expiredFromCreatedTime;
                                         }
 
                                         ++events;
-                                        String[] splitParts = sKey.split("-");
                                         if (splitParts.length - 6 > 0) {
                                             try {
                                                 long ctime = Long.valueOf(splitParts[splitParts.length - 6]);
@@ -1067,6 +1081,16 @@ public class RocksDBStore<K,V> implements SegmentedAdvancedLoadWriteStore<K,V> {
                                             } catch (Exception var34) {
                                             }
                                         }
+                                    }
+
+                                    if(subKey.equals("Action")) {
+                                            try {
+                                                long ctime = Long.valueOf(splitParts[splitParts.length - 1]);
+                                                if (ctime < maxExpireTimeForEvents) {
+                                                    ++expiredActions;
+                                                }
+                                            } catch (Exception var34) {
+                                            }
                                     }
                                 }
                             }
@@ -1104,12 +1128,18 @@ public class RocksDBStore<K,V> implements SegmentedAdvancedLoadWriteStore<K,V> {
             }
 
             RocksDBStore.log.infof("Statistics from scanning of RocksDB data:", new Object[0]);
-            RocksDBStore.log.infof("Total count: %d", totalCount);
-            RocksDBStore.log.infof("Event count: %d", events);
-            RocksDBStore.log.infof("Failed reads: %d", failedReads);
-            RocksDBStore.log.infof("Expired reads: %d", expiredItems);
-            RocksDBStore.log.infof("Expired event items: %d", expiredFromCreatedTime);
-            RocksDBStore.log.infof("Expired from key parsing: %d", expiredKeyParsing);
+            RocksDBStore.log.infof("\tTotal count: %d", totalCount);
+            RocksDBStore.log.infof("\tEvent count: %d", events);
+            RocksDBStore.log.infof("\tFailed reads: %d", failedReads);
+            RocksDBStore.log.infof("\tExpired reads: %d", expiredItems);
+            RocksDBStore.log.infof("\tExpired event items: %d", expiredFromCreatedTime);
+            RocksDBStore.log.infof("\tExpired from key parsing: %d", expiredKeyParsing);
+            log.infof("\tExpired actions from key parsing: %d", expiredActions);
+
+            log.infof("\tDetailed stats:");
+            for (Map.Entry<String, AtomicLong> ae : keyStats.entrySet()) {
+                log.infof("\t\t%s\t\t%d", ae.getKey(), ae.getValue().get());
+            }
         }
 
         @Override
