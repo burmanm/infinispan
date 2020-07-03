@@ -68,18 +68,18 @@
          </notifier>
       </notifiers>
    </ciManagement>
-   <distributionManagement>
-      <repository>
-         <id>${jboss.releases.repo.id}</id>
-         <name>JBoss Release Repository</name>
-         <url>${jboss.releases.repo.url}</url>
-      </repository>
-      <snapshotRepository>
-         <id>${jboss.snapshots.repo.id}</id>
-         <name>JBoss Snapshot Repository</name>
-         <url>${jboss.snapshots.repo.url}</url>
-      </snapshotRepository>
-   </distributionManagement>
+<!--   <distributionManagement>-->
+<!--      <repository>-->
+<!--         <id>${jboss.releases.repo.id}</id>-->
+<!--         <name>JBoss Release Repository</name>-->
+<!--         <url>${jboss.releases.repo.url}</url>-->
+<!--      </repository>-->
+<!--      <snapshotRepository>-->
+<!--         <id>${jboss.snapshots.repo.id}</id>-->
+<!--         <name>JBoss Snapshot Repository</name>-->
+<!--         <url>${jboss.snapshots.repo.url}</url>-->
+<!--      </snapshotRepository>-->
+<!--   </distributionManagement>-->
    <modules>
       <module>build-configuration</module>
       <module>checkstyle</module>

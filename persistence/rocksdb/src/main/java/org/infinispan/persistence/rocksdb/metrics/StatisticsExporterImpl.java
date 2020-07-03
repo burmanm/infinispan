@@ -696,6 +696,7 @@ public class StatisticsExporterImpl implements StatisticsExporter {
 
     @ManagedAttribute
     public long getTxnGetTryAgain() {
-        return statistics != null ? statistics.getTickerCount(TickerType.TXN_GET_TRY_AGAIN) : 0;
+        return 0;
+//        return statistics != null ? statistics.getTickerCount(TickerType.TXN_GET_TRY_AGAIN) : 0;
     }
 }

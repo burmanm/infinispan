@@ -62,18 +62,18 @@
          </notifier>
       </notifiers>
    </ciManagement>
-   <distributionManagement>
-      <repository>
-         <id>${jboss.releases.repo.id}</id>
-         <name>JBoss Release Repository</name>
-         <url>${jboss.releases.repo.url}</url>
-      </repository>
-      <snapshotRepository>
-         <id>${jboss.snapshots.repo.id}</id>
-         <name>JBoss Snapshot Repository</name>
-         <url>${jboss.snapshots.repo.url}</url>
-      </snapshotRepository>
-   </distributionManagement>
+<!--   <distributionManagement>-->
+<!--      <repository>-->
+<!--         <id>${jboss.releases.repo.id}</id>-->
+<!--         <name>JBoss Release Repository</name>-->
+<!--         <url>${jboss.releases.repo.url}</url>-->
+<!--      </repository>-->
+<!--      <snapshotRepository>-->
+<!--         <id>${jboss.snapshots.repo.id}</id>-->
+<!--         <name>JBoss Snapshot Repository</name>-->
+<!--         <url>${jboss.snapshots.repo.url}</url>-->
+<!--      </snapshotRepository>-->
+<!--   </distributionManagement>-->
    <modules>
       <module>bom</module>
    </modules>
@@ -94,11 +94,11 @@
       <wildfly.brand.prefix>wildfly</wildfly.brand.prefix>
 
       <!-- jboss repository urls -->
-      <jboss.releases.repo.id>jboss-releases-repository</jboss.releases.repo.id>
-      <jboss.releases.nexus.url>https://repository.jboss.org/nexus</jboss.releases.nexus.url>
-      <jboss.releases.repo.url>${jboss.releases.nexus.url}/service/local/staging/deploy/maven2/</jboss.releases.repo.url>
-      <jboss.snapshots.repo.id>jboss-snapshots-repository</jboss.snapshots.repo.id>
-      <jboss.snapshots.repo.url>${jboss.releases.nexus.url}/content/repositories/snapshots/</jboss.snapshots.repo.url>
+<!--      <jboss.releases.repo.id>jboss-releases-repository</jboss.releases.repo.id>-->
+<!--      <jboss.releases.nexus.url>https://repository.jboss.org/nexus</jboss.releases.nexus.url>-->
+<!--      <jboss.releases.repo.url>${jboss.releases.nexus.url}/service/local/staging/deploy/maven2/</jboss.releases.repo.url>-->
+<!--      <jboss.snapshots.repo.id>jboss-snapshots-repository</jboss.snapshots.repo.id>-->
+<!--      <jboss.snapshots.repo.url>${jboss.releases.nexus.url}/content/repositories/snapshots/</jboss.snapshots.repo.url>-->
 
       <!-- === Application Server Configuration === -->
 

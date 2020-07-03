@@ -440,6 +440,10 @@ public class RocksDBStore<K,V> implements SegmentedAdvancedLoadWriteStore<K,V> {
         handler.removeSegments(segments);
     }
 
+    public void compact() throws RocksDBException {
+        handler.compact();
+    }
+
     private byte[] marshall(Object entry) throws IOException, InterruptedException {
         return marshaller.objectToByteBuffer(entry);
     }
@@ -803,6 +807,8 @@ public class RocksDBStore<K,V> implements SegmentedAdvancedLoadWriteStore<K,V> {
         abstract void addSegments(IntSet segments);
 
         abstract void removeSegments(IntSet segments);
+
+        abstract void compact() throws RocksDBException;
     }
 
     private final class NonSegmentedRocksDBHandler extends RocksDBHandler {
@@ -963,6 +969,11 @@ public class RocksDBStore<K,V> implements SegmentedAdvancedLoadWriteStore<K,V> {
         void removeSegments(IntSet segments) {
             clear(segments);
         }
+
+        @Override
+        void compact() throws RocksDBException {
+            db.compactRange();
+        }
     }
 
     private class SegmentedRocksDBHandler extends RocksDBHandler {
@@ -1009,10 +1020,7 @@ public class RocksDBStore<K,V> implements SegmentedAdvancedLoadWriteStore<K,V> {
             RocksDB rocksDB = RocksDB.open(options, location.toString(), descriptors, outHandles);
             for (int i = 0; i < segmentCount; ++i) {
                 handles.set(i, outHandles.get(i + 1));
-                log.infof("Compacting ColumnFamilyHandle %d\n", i);
-                rocksDB.compactRange(getHandle(i));
             }
-            printKeyInfo(rocksDB);
             return rocksDB;
         }
 
@@ -1314,6 +1322,16 @@ public class RocksDBStore<K,V> implements SegmentedAdvancedLoadWriteStore<K,V> {
                     }
                     handle.close();
                 }
+            }
+        }
+
+        @Override
+        void compact() throws RocksDBException {
+            IntSet integers = IntSets.immutableRangeSet(this.handles.length());
+            log.infof("Compacting %d column families", integers.size());
+            for (Integer i : integers) {
+                log.infof("Compacting ColumnFamilyHandle %d", i);
+                db.compactRange(getHandle(i));
             }
         }
     }
