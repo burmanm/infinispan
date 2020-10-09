@@ -126,14 +126,12 @@ public class RocksDBStoreConfigurationParser implements ConfigurationParser {
    }
 
    private void parseCompression(XMLExtendedStreamReader reader, RocksDBStoreConfigurationBuilder builder) throws XMLStreamException {
-      System.out.printf("parseCompression called\n");
       for (int i = 0; i < reader.getAttributeCount(); i++) {
          String value = reader.getAttributeValue(i);
          Attribute attribute = Attribute.forName(reader.getAttributeLocalName(i));
          switch (attribute) {
             case TYPE: {
                builder.compressionType(CompressionType.valueOf(value));
-               System.out.printf("setCompressionType to: %s\n", CompressionType.valueOf(value).toString());
                break;
             }
             default:

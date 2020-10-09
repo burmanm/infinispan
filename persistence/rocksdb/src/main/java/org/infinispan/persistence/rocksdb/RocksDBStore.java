@@ -1,6 +1,60 @@
 package org.infinispan.persistence.rocksdb;
 
-import static org.infinispan.persistence.PersistenceUtil.getQualifiedLocation;
+import io.reactivex.Flowable;
+import io.reactivex.internal.functions.Functions;
+import org.infinispan.AdvancedCache;
+import org.infinispan.commons.CacheConfigurationException;
+import org.infinispan.commons.CacheException;
+import org.infinispan.commons.configuration.ConfiguredBy;
+import org.infinispan.commons.io.ByteBuffer;
+import org.infinispan.commons.marshall.MarshallUtil;
+import org.infinispan.commons.marshall.Marshaller;
+import org.infinispan.commons.marshall.ProtoStreamTypeIds;
+import org.infinispan.commons.persistence.Store;
+import org.infinispan.commons.time.TimeService;
+import org.infinispan.commons.util.AbstractIterator;
+import org.infinispan.commons.util.IntSet;
+import org.infinispan.commons.util.IntSets;
+import org.infinispan.commons.util.Util;
+import org.infinispan.distribution.ch.KeyPartitioner;
+import org.infinispan.marshall.persistence.impl.MarshallableEntryImpl;
+import org.infinispan.marshall.persistence.impl.PersistenceContextInitializerImpl;
+import org.infinispan.metadata.Metadata;
+import org.infinispan.persistence.internal.PersistenceUtil;
+import org.infinispan.persistence.rocksdb.configuration.RocksDBStoreConfiguration;
+import org.infinispan.persistence.rocksdb.logging.Log;
+import org.infinispan.persistence.rocksdb.metrics.StatisticsExporter;
+import org.infinispan.persistence.rocksdb.metrics.StatisticsExporterImpl;
+import org.infinispan.persistence.spi.InitializationContext;
+import org.infinispan.persistence.spi.MarshallableEntry;
+import org.infinispan.persistence.spi.MarshallableEntryFactory;
+import org.infinispan.persistence.spi.MarshalledValue;
+import org.infinispan.persistence.spi.PersistenceException;
+import org.infinispan.persistence.spi.SegmentedAdvancedLoadWriteStore;
+import org.infinispan.protostream.annotations.ProtoField;
+import org.infinispan.protostream.annotations.ProtoTypeId;
+import org.infinispan.reactive.RxJavaInterop;
+import org.infinispan.util.logging.LogFactory;
+import org.infinispan.util.rxjava.FlowableFromIntSetFunction;
+import org.reactivestreams.Publisher;
+import org.rocksdb.BlockBasedTableConfig;
+import org.rocksdb.BuiltinComparator;
+import org.rocksdb.Cache;
+import org.rocksdb.ColumnFamilyDescriptor;
+import org.rocksdb.ColumnFamilyHandle;
+import org.rocksdb.ColumnFamilyOptions;
+import org.rocksdb.DBOptions;
+import org.rocksdb.LRUCache;
+import org.rocksdb.Options;
+import org.rocksdb.ReadOptions;
+import org.rocksdb.RocksDB;
+import org.rocksdb.RocksDBException;
+import org.rocksdb.RocksIterator;
+import org.rocksdb.Statistics;
+import org.rocksdb.StatsLevel;
+import org.rocksdb.TableFormatConfig;
+import org.rocksdb.WriteBatch;
+import org.rocksdb.WriteOptions;
 
 import java.io.File;
 import java.io.IOException;
@@ -24,58 +78,7 @@ import java.util.concurrent.atomic.AtomicReferenceArray;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
-import org.infinispan.AdvancedCache;
-import org.infinispan.commons.CacheConfigurationException;
-import org.infinispan.commons.CacheException;
-import org.infinispan.commons.configuration.ConfiguredBy;
-import org.infinispan.commons.io.ByteBuffer;
-import org.infinispan.commons.marshall.MarshallUtil;
-import org.infinispan.commons.marshall.Marshaller;
-import org.infinispan.commons.marshall.ProtoStreamTypeIds;
-import org.infinispan.commons.persistence.Store;
-import org.infinispan.commons.time.TimeService;
-import org.infinispan.commons.util.AbstractIterator;
-import org.infinispan.commons.util.IntSet;
-import org.infinispan.commons.util.IntSets;
-import org.infinispan.commons.util.Util;
-import org.infinispan.distribution.ch.KeyPartitioner;
-import org.infinispan.marshall.persistence.impl.MarshallableEntryImpl;
-import org.infinispan.metadata.Metadata;
-import org.infinispan.persistence.internal.PersistenceUtil;
-import org.infinispan.persistence.rocksdb.configuration.RocksDBStoreConfiguration;
-import org.infinispan.persistence.rocksdb.logging.Log;
-import org.infinispan.persistence.rocksdb.metrics.StatisticsExporter;
-import org.infinispan.persistence.rocksdb.metrics.StatisticsExporterImpl;
-import org.infinispan.persistence.spi.InitializationContext;
-import org.infinispan.persistence.spi.MarshallableEntry;
-import org.infinispan.persistence.spi.MarshallableEntryFactory;
-import org.infinispan.persistence.spi.MarshalledValue;
-import org.infinispan.persistence.spi.PersistenceException;
-import org.infinispan.persistence.spi.SegmentedAdvancedLoadWriteStore;
-import org.infinispan.protostream.annotations.ProtoField;
-import org.infinispan.protostream.annotations.ProtoTypeId;
-import org.infinispan.reactive.RxJavaInterop;
-import org.infinispan.util.concurrent.CompletionStages;
-import org.infinispan.util.logging.LogFactory;
-import org.infinispan.util.rxjava.FlowableFromIntSetFunction;
-import org.reactivestreams.Publisher;
-import org.rocksdb.BuiltinComparator;
-import org.rocksdb.ColumnFamilyDescriptor;
-import org.rocksdb.ColumnFamilyHandle;
-import org.rocksdb.ColumnFamilyOptions;
-import org.rocksdb.DBOptions;
-import org.rocksdb.Options;
-import org.rocksdb.ReadOptions;
-import org.rocksdb.RocksDB;
-import org.rocksdb.RocksDBException;
-import org.rocksdb.RocksIterator;
-import org.rocksdb.Statistics;
-import org.rocksdb.StatsLevel;
-import org.rocksdb.WriteBatch;
-import org.rocksdb.WriteOptions;
-
-import io.reactivex.Flowable;
-import io.reactivex.internal.functions.Functions;
+import static org.infinispan.persistence.PersistenceUtil.getQualifiedLocation;
 
 @Store
 @ConfiguredBy(RocksDBStoreConfiguration.class)
@@ -179,6 +182,7 @@ public class RocksDBStore<K,V> implements SegmentedAdvancedLoadWriteStore<K,V> {
             ((StatisticsExporterImpl) this.statisticsExporter).init(statistics);
             dbOptions.setStatistics(statistics);
         }
+//        new org.rocksdb.WriteBufferManager(TOTAL_MEMTABLE_MEMORY, cache);
         return dbOptions
               .setCreateIfMissing(true)
               // We have to create missing column families on open.
@@ -603,6 +607,8 @@ public class RocksDBStore<K,V> implements SegmentedAdvancedLoadWriteStore<K,V> {
             return getHandle(segment);
         }
 
+        abstract Cache getBlockCache();
+
         abstract int calculateSegment(Object key);
 
         ColumnFamilyDescriptor newDescriptor(byte[] name) {
@@ -618,6 +624,23 @@ public class RocksDBStore<K,V> implements SegmentedAdvancedLoadWriteStore<K,V> {
             if (configuration.attributes().attribute(RocksDBStoreConfiguration.COMPRESSION_TYPE).isModified()) {
                 columnFamilyOptions.setCompressionType(configuration.compressionType().getValue());
             }
+            BlockBasedTableConfig blockBasedTableConfig = null;
+            TableFormatConfig tableFormatConfig = columnFamilyOptions.tableFormatConfig();
+            if(tableFormatConfig == null) {
+                blockBasedTableConfig = new BlockBasedTableConfig();
+            } else if(tableFormatConfig instanceof BlockBasedTableConfig) {
+                blockBasedTableConfig = (BlockBasedTableConfig) tableFormatConfig;
+            }
+            if(blockBasedTableConfig != null) {
+                // If Plain table is used, this can't be set
+                blockBasedTableConfig.setCacheIndexAndFilterBlocks(true);
+                blockBasedTableConfig.setBlockCache(getBlockCache());
+                blockBasedTableConfig.setCacheIndexAndFilterBlocksWithHighPriority(true);
+                blockBasedTableConfig.setPinL0FilterAndIndexBlocksInCache(true);
+                blockBasedTableConfig.setEnableIndexCompression(true);
+                columnFamilyOptions.setTableFormatConfig(blockBasedTableConfig);
+            }
+
             return new ColumnFamilyDescriptor(name, columnFamilyOptions);
         }
 
@@ -814,6 +837,7 @@ public class RocksDBStore<K,V> implements SegmentedAdvancedLoadWriteStore<K,V> {
     private final class NonSegmentedRocksDBHandler extends RocksDBHandler {
         private final KeyPartitioner keyPartitioner;
         private ColumnFamilyHandle defaultColumnFamilyHandle;
+        private LRUCache cache;
 
         public NonSegmentedRocksDBHandler(KeyPartitioner keyPartitioner) {
             this.keyPartitioner = keyPartitioner;
@@ -822,6 +846,11 @@ public class RocksDBStore<K,V> implements SegmentedAdvancedLoadWriteStore<K,V> {
         @Override
         ColumnFamilyHandle getHandle(int segment) {
             return defaultColumnFamilyHandle;
+        }
+
+        @Override
+        Cache getBlockCache() {
+            return this.cache;
         }
 
         @Override
@@ -838,6 +867,7 @@ public class RocksDBStore<K,V> implements SegmentedAdvancedLoadWriteStore<K,V> {
             RocksDB rocksDB = RocksDB.open(options, location.toString(),
                   Collections.singletonList(newDescriptor(RocksDB.DEFAULT_COLUMN_FAMILY)),
                   handles);
+            cache = new LRUCache(512*1024*1024); // TODO Configurable
             defaultColumnFamilyHandle = handles.get(0);
             return rocksDB;
         }
@@ -979,6 +1009,7 @@ public class RocksDBStore<K,V> implements SegmentedAdvancedLoadWriteStore<K,V> {
     private class SegmentedRocksDBHandler extends RocksDBHandler {
         private final KeyPartitioner keyPartitioner;
         private final AtomicReferenceArray<ColumnFamilyHandle> handles;
+        private LRUCache cache;
 
         private SegmentedRocksDBHandler(int segmentCount, KeyPartitioner keyPartitioner) {
             this.keyPartitioner = keyPartitioner;
@@ -1000,6 +1031,11 @@ public class RocksDBStore<K,V> implements SegmentedAdvancedLoadWriteStore<K,V> {
         }
 
         @Override
+        Cache getBlockCache() {
+            return this.cache;
+        }
+
+        @Override
         int calculateSegment(Object key) {
             return keyPartitioner.getSegment(key);
         }
@@ -1012,6 +1048,7 @@ public class RocksDBStore<K,V> implements SegmentedAdvancedLoadWriteStore<K,V> {
             List<ColumnFamilyDescriptor> descriptors = new ArrayList<>(segmentCount + 1);
             List<ColumnFamilyHandle> outHandles = new ArrayList<>(segmentCount + 1);
             // You have to open the default column family
+            this.cache = new LRUCache(128*1024*1024); // TODO Make the size adjustable
             descriptors.add(new ColumnFamilyDescriptor(
                   RocksDB.DEFAULT_COLUMN_FAMILY, new ColumnFamilyOptions()));
             for (int i = 0; i < segmentCount; ++i) {
