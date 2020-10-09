@@ -18,6 +18,7 @@
         <dependency>
             <groupId>org.jboss.marshalling</groupId>
             <artifactId>jboss-marshalling-osgi</artifactId>
+            <version>2.0.10.Final-SNAPSHOT</version>
         </dependency>
 
         <dependency>
@@ -142,4 +143,10 @@
             </plugin>
         </plugins>
     </build>
+    <distributionManagement>
+        <repository>
+            <id>internal</id>
+            <url>file://${project.build.directory}/mvn-repo</url>
+        </repository>
+    </distributionManagement>
 </project>
