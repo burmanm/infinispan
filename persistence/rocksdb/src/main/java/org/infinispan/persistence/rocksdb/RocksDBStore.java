@@ -779,7 +779,14 @@ public class RocksDBStore<K,V> implements SegmentedAdvancedLoadWriteStore<K,V> {
                                                                    boolean fetchValue, boolean fetchMetadata);
 
         int size(IntSet segments) {
-            return Integer.MAX_VALUE;
+            CompletionStage<Long> stage = Flowable.fromPublisher(publishKeys(segments, null))
+                  .count().to(RxJavaInterop.singleToCompletionStage());
+
+            long count = CompletionStages.join(stage);
+            if (count > Integer.MAX_VALUE) {
+                return Integer.MAX_VALUE;
+            }
+            return (int) count;
         }
 
         <P> Flowable<P> publish(int segment, Function<RocksIterator, Flowable<P>> function) {
