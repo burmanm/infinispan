@@ -59,11 +59,14 @@ import org.infinispan.util.concurrent.CompletionStages;
 import org.infinispan.util.logging.LogFactory;
 import org.infinispan.util.rxjava.FlowableFromIntSetFunction;
 import org.reactivestreams.Publisher;
+import org.rocksdb.BlockBasedTableConfig;
 import org.rocksdb.BuiltinComparator;
+import org.rocksdb.Cache;
 import org.rocksdb.ColumnFamilyDescriptor;
 import org.rocksdb.ColumnFamilyHandle;
 import org.rocksdb.ColumnFamilyOptions;
 import org.rocksdb.DBOptions;
+import org.rocksdb.LRUCache;
 import org.rocksdb.Options;
 import org.rocksdb.ReadOptions;
 import org.rocksdb.RocksDB;
@@ -71,6 +74,7 @@ import org.rocksdb.RocksDBException;
 import org.rocksdb.RocksIterator;
 import org.rocksdb.Statistics;
 import org.rocksdb.StatsLevel;
+import org.rocksdb.TableFormatConfig;
 import org.rocksdb.WriteBatch;
 import org.rocksdb.WriteOptions;
 
@@ -603,6 +607,8 @@ public class RocksDBStore<K,V> implements SegmentedAdvancedLoadWriteStore<K,V> {
             return getHandle(segment);
         }
 
+        abstract Cache getBlockCache();
+
         abstract int calculateSegment(Object key);
 
         ColumnFamilyDescriptor newDescriptor(byte[] name) {
@@ -618,6 +624,23 @@ public class RocksDBStore<K,V> implements SegmentedAdvancedLoadWriteStore<K,V> {
             if (configuration.attributes().attribute(RocksDBStoreConfiguration.COMPRESSION_TYPE).isModified()) {
                 columnFamilyOptions.setCompressionType(configuration.compressionType().getValue());
             }
+            BlockBasedTableConfig blockBasedTableConfig = null;
+            TableFormatConfig tableFormatConfig = columnFamilyOptions.tableFormatConfig();
+            if (tableFormatConfig == null) {
+                blockBasedTableConfig = new BlockBasedTableConfig();
+            } else if (tableFormatConfig instanceof BlockBasedTableConfig) {
+                blockBasedTableConfig = (BlockBasedTableConfig) tableFormatConfig;
+            }
+            if (blockBasedTableConfig != null) {
+                // If Plain table is used, this can't be set
+                blockBasedTableConfig.setCacheIndexAndFilterBlocks(true);
+                blockBasedTableConfig.setBlockCache(getBlockCache());
+                blockBasedTableConfig.setCacheIndexAndFilterBlocksWithHighPriority(true);
+                blockBasedTableConfig.setPinL0FilterAndIndexBlocksInCache(true);
+                blockBasedTableConfig.setEnableIndexCompression(true);
+                columnFamilyOptions.setTableFormatConfig(blockBasedTableConfig);
+            }
+
             return new ColumnFamilyDescriptor(name, columnFamilyOptions);
         }
 
@@ -814,6 +837,7 @@ public class RocksDBStore<K,V> implements SegmentedAdvancedLoadWriteStore<K,V> {
     private final class NonSegmentedRocksDBHandler extends RocksDBHandler {
         private final KeyPartitioner keyPartitioner;
         private ColumnFamilyHandle defaultColumnFamilyHandle;
+        private Cache cache;
 
         public NonSegmentedRocksDBHandler(KeyPartitioner keyPartitioner) {
             this.keyPartitioner = keyPartitioner;
@@ -822,6 +846,11 @@ public class RocksDBStore<K,V> implements SegmentedAdvancedLoadWriteStore<K,V> {
         @Override
         ColumnFamilyHandle getHandle(int segment) {
             return defaultColumnFamilyHandle;
+        }
+
+        @Override
+        Cache getBlockCache() {
+            return this.cache;
         }
 
         @Override
@@ -838,6 +867,7 @@ public class RocksDBStore<K,V> implements SegmentedAdvancedLoadWriteStore<K,V> {
             RocksDB rocksDB = RocksDB.open(options, location.toString(),
                   Collections.singletonList(newDescriptor(RocksDB.DEFAULT_COLUMN_FAMILY)),
                   handles);
+            cache = new LRUCache(128*1024*1024);
             defaultColumnFamilyHandle = handles.get(0);
             return rocksDB;
         }
@@ -979,6 +1009,7 @@ public class RocksDBStore<K,V> implements SegmentedAdvancedLoadWriteStore<K,V> {
     private class SegmentedRocksDBHandler extends RocksDBHandler {
         private final KeyPartitioner keyPartitioner;
         private final AtomicReferenceArray<ColumnFamilyHandle> handles;
+        private LRUCache cache;
 
         private SegmentedRocksDBHandler(int segmentCount, KeyPartitioner keyPartitioner) {
             this.keyPartitioner = keyPartitioner;
@@ -1000,6 +1031,11 @@ public class RocksDBStore<K,V> implements SegmentedAdvancedLoadWriteStore<K,V> {
         }
 
         @Override
+        Cache getBlockCache() {
+            return this.cache;
+        }
+
+        @Override
         int calculateSegment(Object key) {
             return keyPartitioner.getSegment(key);
         }
@@ -1018,6 +1054,7 @@ public class RocksDBStore<K,V> implements SegmentedAdvancedLoadWriteStore<K,V> {
                 descriptors.add(newDescriptor(byteArrayFromInt(i)));
             }
             RocksDB rocksDB = RocksDB.open(options, location.toString(), descriptors, outHandles);
+            cache = new LRUCache(512*1024*1024);
             for (int i = 0; i < segmentCount; ++i) {
                 handles.set(i, outHandles.get(i + 1));
             }
