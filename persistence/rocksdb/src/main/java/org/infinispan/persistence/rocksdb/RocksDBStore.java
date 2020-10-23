@@ -55,7 +55,6 @@ import org.infinispan.persistence.spi.SegmentedAdvancedLoadWriteStore;
 import org.infinispan.protostream.annotations.ProtoField;
 import org.infinispan.protostream.annotations.ProtoTypeId;
 import org.infinispan.reactive.RxJavaInterop;
-import org.infinispan.util.concurrent.CompletionStages;
 import org.infinispan.util.logging.LogFactory;
 import org.infinispan.util.rxjava.FlowableFromIntSetFunction;
 import org.reactivestreams.Publisher;
@@ -638,6 +637,9 @@ public class RocksDBStore<K,V> implements SegmentedAdvancedLoadWriteStore<K,V> {
                 blockBasedTableConfig.setCacheIndexAndFilterBlocksWithHighPriority(true);
                 blockBasedTableConfig.setPinL0FilterAndIndexBlocksInCache(true);
                 blockBasedTableConfig.setEnableIndexCompression(true);
+                blockBasedTableConfig.setVerifyCompression(false);
+                blockBasedTableConfig.setPinTopLevelIndexAndFilter(true);
+                blockBasedTableConfig.setCacheIndexAndFilterBlocks(true);
                 columnFamilyOptions.setTableFormatConfig(blockBasedTableConfig);
             }
 
